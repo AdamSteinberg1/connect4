@@ -18,7 +18,7 @@ Connect 4 is a two-player connection game where players alternate dropping color
 # Requires Rust: https://www.rust-lang.org/tools/install
 git clone https://github.com/AdamSteinberg1/connect4.git
 cd connect4
-cargo run --release
+cargo run -p connect4-client --release
 ```
 
 ## Controls

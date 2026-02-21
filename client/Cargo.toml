@@ -1,0 +1,11 @@
+[package]
+name = "connect4-client"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+shared = { path = "../shared" }
+anyhow = "1.0.100"
+crossterm = "0.29.0"
+itertools = "0.14.0"
+ratatui = "0.30.0"

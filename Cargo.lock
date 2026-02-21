@@ -128,13 +128,21 @@ dependencies = [
 ]
 
 [[package]]
-name = "connect4"
+name = "connect4-client"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "crossterm",
  "itertools 0.14.0",
  "ratatui",
+ "shared",
+]
+
+[[package]]
+name = "connect4-server"
+version = "0.1.0"
+dependencies = [
+ "shared",
 ]
 
 [[package]]
@@ -1050,6 +1058,10 @@ dependencies = [
  "cpufeatures",
  "digest",
 ]
+
+[[package]]
+name = "shared"
+version = "0.1.0"
 
 [[package]]
 name = "signal-hook"
