@@ -1076,6 +1076,11 @@ dependencies = [
 [[package]]
 name = "shared"
 version = "0.1.0"
+dependencies = [
+ "itertools 0.14.0",
+ "serde",
+ "thiserror 2.0.17",
+]
 
 [[package]]
 name = "signal-hook"

@@ -1,6 +1,3 @@
-mod board;
-
-use crate::board::{Board, Color};
 use crate::GameState::{Complete, Exit, Playing};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use itertools::Itertools;
@@ -11,13 +8,14 @@ use ratatui::text::{Span, Text};
 use ratatui::widgets::BorderType::QuadrantInside;
 use ratatui::widgets::Paragraph;
 use ratatui::{
-    buffer::Buffer, layout::Rect,
+    DefaultTerminal, Frame,
+    buffer::Buffer,
+    layout::Rect,
     style::Stylize,
     text::Line,
     widgets::{Block, Padding, Widget},
-    DefaultTerminal,
-    Frame,
 };
+use shared::{Board, Color, ColumnIndex};
 use std::io;
 //todo highlight the winning 4
 //todo make start menu
@@ -71,19 +69,19 @@ impl App {
 
     fn increment_selection(&mut self) {
         if let Some(col_idx) = self.board_widget.selected_column.as_mut() {
-            *col_idx = 6.min(*col_idx + 1)
+            col_idx.increment();
         } else {
             //default to right-most column
-            self.board_widget.selected_column = Some(6);
+            self.board_widget.selected_column = Some(ColumnIndex::right_most());
         }
     }
 
     fn decrement_selection(&mut self) {
         if let Some(col_idx) = self.board_widget.selected_column.as_mut() {
-            *col_idx = col_idx.saturating_sub(1);
+            col_idx.decrement()
         } else {
             //default to left-most column
-            self.board_widget.selected_column = Some(0);
+            self.board_widget.selected_column = Some(ColumnIndex::left_most())
         }
     }
 
@@ -105,11 +103,11 @@ impl App {
         match (&self.game_state, key_event.code) {
             (_, KeyCode::Char('q') | KeyCode::Esc) => self.exit(),
             (Playing, KeyCode::Char(digit)) => {
-                if let Some(num) = digit.to_digit(10)
-                    && num <= 7
-                {
+                if let Some(num) = digit.to_digit(10) {
                     let col_idx = (num - 1) as usize;
-                    self.board_widget.selected_column = Some(col_idx);
+                    if let Ok(col_idx) = ColumnIndex::new(col_idx) {
+                        self.board_widget.selected_column = Some(col_idx);
+                    }
                 };
             }
             (Playing, KeyCode::Left) => self.decrement_selection(),
@@ -126,11 +124,11 @@ impl App {
         }
     }
 
-    fn take_turn(&mut self, column_idx: usize) {
+    fn take_turn(&mut self, column: ColumnIndex) {
         let turn_result = self
             .board_widget
             .board
-            .play_turn(column_idx, self.current_player);
+            .play_turn(column, self.current_player);
         if turn_result.is_err() {
             self.subtitle = "invalid move, try again".to_owned();
             return;
@@ -237,7 +235,7 @@ impl Widget for &App {
 #[derive(Default)]
 struct BoardWidget {
     board: Board,
-    selected_column: Option<usize>,
+    selected_column: Option<ColumnIndex>,
 }
 
 impl Widget for &BoardWidget {
@@ -263,7 +261,7 @@ impl Widget for &BoardWidget {
                             Some(Color::Red) => "◉".red(),
                             Some(Color::Yellow) => "◉".yellow(),
                         };
-                        if self.selected_column == Some(col_idx) {
+                        if self.selected_column.map(ColumnIndex::as_usize) == Some(col_idx) {
                             span.on_dark_gray()
                         } else {
                             span
@@ -282,7 +280,7 @@ impl Widget for &BoardWidget {
         let numbers = (0..7)
             .map(|i| {
                 let span = Span::from((i + 1).to_string());
-                if self.selected_column == Some(i) {
+                if self.selected_column.map(ColumnIndex::as_usize) == Some(i) {
                     span.on_dark_gray()
                 } else {
                     span
