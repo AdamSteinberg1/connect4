@@ -38,4 +38,5 @@ pub enum ServerMessage {
     },
     OpponentDisconnected,
     GameNotFound,
+    GameFull
 }

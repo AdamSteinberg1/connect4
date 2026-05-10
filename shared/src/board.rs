@@ -14,7 +14,7 @@ pub enum Color {
 
 type Slot = Option<Color>;
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug, Default)]
 pub struct Board {
     slots: Vec<Slot>,
 }
@@ -84,12 +84,6 @@ impl Board {
             let j = (ROW_SIZE + i).checked_sub(num + 1)?;
             self.get_slot(i, j)
         })
-    }
-}
-
-impl Default for Board {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

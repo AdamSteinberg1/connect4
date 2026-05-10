@@ -1,34 +1,43 @@
+use rand::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 use thiserror::Error;
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct JoinCode(String);
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Hash)]
+pub struct JoinCode([u8; LENGTH]);
 
 #[derive(Debug, Error)]
 #[error("invalid join code")]
 pub struct InvalidJoinCode;
 
+const LENGTH: usize = 6;
+const CHARSET: &[u8; 32] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
+impl JoinCode {
+    pub fn random() -> Self {
+        let mut rng = rand::rng();
+        let code = CHARSET
+            .sample_array(&mut rng)
+            .expect("There should always be enough chars in charset");
+        Self(code)
+    }
+}
+
 impl FromStr for JoinCode {
     type Err = InvalidJoinCode;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        const LENGTH: usize = 6;
-        const CHARSET: &'static str = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-
-        if s.len() != LENGTH {
+        let s: [u8; LENGTH] = s.as_bytes().try_into().map_err(|_| InvalidJoinCode)?;
+        if s.iter().any(|c| !CHARSET.contains(c)) {
             return Err(InvalidJoinCode);
         }
-        if s.chars().any(|c| !CHARSET.contains(c)) {
-            return Err(InvalidJoinCode);
-        }
-        Ok(Self(s.to_owned()))
+        Ok(Self(s))
     }
 }
 
 impl fmt::Display for JoinCode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
+        write!(f, "{}", String::from_utf8_lossy(&self.0))
     }
 }
