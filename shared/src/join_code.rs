@@ -4,7 +4,7 @@ use std::fmt;
 use std::str::FromStr;
 use thiserror::Error;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
 pub struct JoinCode([u8; LENGTH]);
 
 #[derive(Debug, Error)]
@@ -39,5 +39,10 @@ impl FromStr for JoinCode {
 impl fmt::Display for JoinCode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", String::from_utf8_lossy(&self.0))
+    }
+}
+impl fmt::Debug for JoinCode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(self, f)
     }
 }

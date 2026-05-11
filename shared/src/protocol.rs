@@ -22,7 +22,7 @@ pub enum ClientMessage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ServerMessage {
     GameCreated {
-        code: JoinCode,
+        join_code: JoinCode,
     },
     GameStarted {
         your_color: Color,
@@ -38,5 +38,6 @@ pub enum ServerMessage {
     },
     OpponentDisconnected,
     GameNotFound,
-    GameFull
+    GameFull,
+    CannotJoinOwnGame
 }
