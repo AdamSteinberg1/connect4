@@ -1,13 +1,13 @@
 use anyhow::Result;
 use bytes::Bytes;
-use futures::StreamExt;
 use futures::sink::SinkExt;
+use futures::StreamExt;
 use shared::{Board, ClientMessage, Color, ColumnIndex, JoinCode, ServerMessage};
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::try_join;
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
@@ -22,21 +22,54 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-#[derive(Default)]
+
 struct Session {
     board: Board,
-    red_addr: Option<SocketAddr>,
-    yellow_addr: Option<SocketAddr>,
+    host: Player,
+    guest: Option<Player>, //todo it would be real nice if this wasn't an option
+}
+
+impl Session {
+    fn new(host: Player) -> Self {
+        Self {
+            host,
+            board: Board::new(),
+            guest: None,
+        }
+    }
+
+    fn add_guest(&mut self, guest: Player) {
+        self.guest = Some(guest);
+    }
+
+    fn get_player(&self, addr: &SocketAddr) -> Option<&Player> {
+        if self.host.addr == *addr {
+            return Some(&self.host);
+        }
+        self.guest.as_ref().filter(|guest| guest.addr == *addr)
+    }
+
+    async fn send_to_all(&mut self, msg: ServerMessage) -> Result<(), SendError<ServerMessage>> {
+        //todo maybe do a join
+        self.host.response_tx.send(msg.clone()).await?;
+        if let Some(guest) = self.guest.as_ref() {
+            guest.response_tx.send(msg).await?;
+        }
+        Ok(())
+    }
+}
+
+struct Player {
+    addr: SocketAddr,
+    response_tx: Sender<ServerMessage>,
+    color: Color,
 }
 
 async fn manage_sessions(mut rx: Receiver<IncomingMessage>) -> Result<()> {
     let mut sessions: HashMap<JoinCode, Session> = HashMap::new();
     let mut join_codes: HashMap<SocketAddr, JoinCode> = HashMap::new();
 
-    loop {
-        let Some(message) = rx.recv().await else {
-            return Ok(());
-        };
+    while let Some(message) = rx.recv().await {
         println!("received a message: {:?}", message);
         let IncomingMessage {
             content: message,
@@ -46,75 +79,136 @@ async fn manage_sessions(mut rx: Receiver<IncomingMessage>) -> Result<()> {
 
         match message {
             ClientMessage::CreateGame => {
-                let join_code = unused_join_code(&sessions);
-                let mut session = Session::default();
-                session.red_addr = Some(addr); //the game creator will always be the red player
-                sessions.insert(join_code, session);
-                join_codes.insert(addr, join_code);
-                let response = ServerMessage::GameCreated { code: join_code }; //todo think about how to notify creator that someone joined
-                response_tx.send(response).await?;
-                continue;
+                create_session(&mut sessions, &mut join_codes, addr, response_tx).await?
             }
             ClientMessage::JoinGame { code } => {
-                if let Some(session) = sessions.get_mut(&code) {
-                    if session.yellow_addr.is_some() {
-                        eprintln!("This game room is full.");
-                        let response = ServerMessage::GameFull;
-                        response_tx.send(response).await?;
-                        continue;
-                    }
-                    session.yellow_addr = Some(addr); //the game joiner will always be yellow
-                    join_codes.insert(addr, code);
-                    let response = ServerMessage::GameStarted {
-                        your_color: Color::Yellow,
-                    };
-                    response_tx.send(response).await?;
-                    continue;
-                } else {
-                    let response = ServerMessage::GameNotFound;
-                    response_tx.send(response).await?;
-                    continue;
-                }
+                join_session(&mut sessions, &mut join_codes, addr, response_tx, code).await?
             }
             ClientMessage::PlayMove { column } => {
-                let session = join_codes.get(&addr).and_then(|c| sessions.get_mut(c));
-                let Some(session) = session else {
-                    let response = ServerMessage::GameNotFound; //todo is this right? This would mean the client tried to play a move without first creating or joining a game
-                    response_tx.send(response).await?;
-                    continue;
-                };
-                let color = if Some(addr) == session.red_addr {
-                    Color::Red
-                } else if Some(addr) == session.yellow_addr {
-                    Color::Yellow
-                } else {
-                    eprintln!(
-                        "Error you tried to play in a game you haven't joined. This shouldn't be possible"
-                    );
-                    continue;
-                };
-                if let Err(e) = session.board.play_turn(column, color) {
-                    let response = ServerMessage::InvalidMove(e);
-                    response_tx.send(response).await?;
-                    continue;
-                }
-
-                if let Some(winner) = session.board.get_winner() {
-                    let response = ServerMessage::GameOver {
-                        winner: Some(winner),
-                    };
-                    response_tx.send(response).await?;
-                    continue;
-                }
-
-                if session.board.is_full() {
-                    let response = ServerMessage::GameOver { winner: None };
-                    response_tx.send(response).await?;
-                    continue;
-                }
+                play_move(&mut sessions, &mut join_codes, addr, response_tx, column).await?
             }
         }
     }
+
+    Ok(())
+}
+
+async fn play_move(
+    sessions: &mut HashMap<JoinCode, Session>,
+    join_codes: &mut HashMap<SocketAddr, JoinCode>,
+    addr: SocketAddr,
+    response_tx: Sender<ServerMessage>,
+    column: ColumnIndex,
+) -> Result<()> {
+    let session = join_codes.get(&addr).and_then(|c| sessions.get_mut(c));
+    let Some(session) = session else {
+        let response = ServerMessage::GameNotFound; //todo is this right? This would mean the client tried to play a move without first creating or joining a game
+        response_tx.send(response).await?;
+        return Ok(());
+    };
+    let Some(player) = session.get_player(&addr) else {
+        eprintln!(
+            "this client played a move without joining the session. This shouldn't be possible."
+        );
+        return Ok(());
+    };
+    let color = player.color;
+    if let Err(e) = session.board.play_turn(column, color) {
+        let response = ServerMessage::InvalidMove(e);
+        response_tx.send(response).await?;
+        return Ok(());
+    }
+
+    let response = ServerMessage::MovePlayed {
+        column,
+        color,
+        board: session.board.clone(), //todo think about if we need the board
+    };
+    session.send_to_all(response).await?;
+
+
+    //handle game over
+    if let Some(winner) = session.board.get_winner() {
+        let response = ServerMessage::GameOver {
+            winner: Some(winner),
+        };
+        session.send_to_all(response).await?;
+    } else if session.board.is_full() {
+        let response = ServerMessage::GameOver { winner: None };
+        session.send_to_all(response).await?;
+    }
+    Ok(())
+}
+
+async fn join_session(
+    sessions: &mut HashMap<JoinCode, Session>,
+    join_codes: &mut HashMap<SocketAddr, JoinCode>,
+    addr: SocketAddr,
+    response_tx: Sender<ServerMessage>,
+    code: JoinCode,
+) -> Result<()> {
+    let Some(session) = sessions.get_mut(&code) else {
+        let response = ServerMessage::GameNotFound;
+        response_tx.send(response).await?;
+        return Ok(());
+    };
+    if session.host.addr == addr {
+        let response = ServerMessage::CannotJoinOwnGame;
+        response_tx.send(response).await?;
+        return Ok(());
+    }
+    if session.guest.is_some() {
+        let response = ServerMessage::GameFull;
+        response_tx.send(response).await?;
+        return Ok(());
+    }
+
+    let guest = Player {
+        addr,
+        response_tx,
+        color: Color::Yellow, //the game guest will always be yellow
+    };
+    session.add_guest(guest);
+    join_codes.insert(addr, code);
+
+    let host_response = ServerMessage::GameStarted {
+        your_color: session.host.color,
+    };
+    session.host.response_tx.send(host_response).await?;
+
+    let guest_response = ServerMessage::GameStarted {
+        your_color: session.guest.as_ref().unwrap().color,
+    };
+    session
+        .guest
+        .as_ref()
+        .unwrap()
+        .response_tx
+        .send(guest_response)
+        .await?;
+    Ok(())
+}
+
+async fn create_session(
+    sessions: &mut HashMap<JoinCode, Session>,
+    join_codes: &mut HashMap<SocketAddr, JoinCode>,
+    addr: SocketAddr,
+    response_tx: Sender<ServerMessage>,
+) -> Result<()> {
+    let join_code = unused_join_code(&sessions);
+    let response = ServerMessage::GameCreated { join_code };
+    response_tx.send(response).await?;
+    let host = Player {
+        addr,
+        response_tx,
+        //the game creator will always be the red player
+        //todo maybe randomize this
+        color: Color::Red,
+    };
+    let session = Session::new(host);
+    sessions.insert(join_code, session);
+    join_codes.insert(addr, join_code);
+    Ok(())
 }
 
 fn unused_join_code(sessions: &HashMap<JoinCode, Session>) -> JoinCode {
