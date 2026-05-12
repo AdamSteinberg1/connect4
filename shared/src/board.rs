@@ -26,11 +26,34 @@ impl Board {
         }
     }
 
+    pub fn whose_turn(&self) -> Color {
+        let mut red_count = 0;
+        let mut yellow_count = 0;
+        for slot in &self.slots {
+            match slot {
+                Some(Color::Red) => red_count += 1,
+                Some(Color::Yellow) => yellow_count += 1,
+                None => {}
+            }
+        }
+
+        // arbitrarily let red go first
+        if red_count > yellow_count {
+            Color::Yellow
+        } else {
+            Color::Red
+        }
+    }
+
     pub fn rows(&self) -> impl Iterator<Item = &[Slot]> {
         self.slots.chunks(ROW_SIZE)
     }
 
     pub fn play_turn(&mut self, col: ColumnIndex, color: Color) -> Result<(), MoveError> {
+        if color != self.whose_turn() {
+            return Err(MoveError::NotYourTurn);
+        }
+
         let col = col.as_usize();
         for row in (0..COL_SIZE).rev() {
             let slot = &mut self.slots[row * ROW_SIZE + col];

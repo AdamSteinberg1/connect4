@@ -17,44 +17,40 @@ async fn main() -> Result<()> {
     let (tx, rx) = tokio::sync::mpsc::channel::<IncomingMessage>(32);
 
     let session_manager = manage_sessions(rx);
-    let connection_handler = handle_connections(tx); //todo handle error
+    let connection_handler = handle_connections(tx);
     try_join!(session_manager, connection_handler)?;
     Ok(())
 }
 
-
 struct Session {
     board: Board,
     host: Player,
-    guest: Option<Player>, //todo it would be real nice if this wasn't an option
+    guest: Player,
 }
 
 impl Session {
-    fn new(host: Player) -> Self {
+    fn new(host: Player, guest: Player) -> Self {
         Self {
             host,
+            guest,
             board: Board::new(),
-            guest: None,
         }
-    }
-
-    fn add_guest(&mut self, guest: Player) {
-        self.guest = Some(guest);
     }
 
     fn get_player(&self, addr: &SocketAddr) -> Option<&Player> {
         if self.host.addr == *addr {
-            return Some(&self.host);
+            Some(&self.host)
+        } else if self.guest.addr == *addr {
+            Some(&self.guest)
+        } else {
+            None
         }
-        self.guest.as_ref().filter(|guest| guest.addr == *addr)
     }
 
     async fn send_to_all(&mut self, msg: ServerMessage) -> Result<(), SendError<ServerMessage>> {
-        //todo maybe do a join
-        self.host.response_tx.send(msg.clone()).await?;
-        if let Some(guest) = self.guest.as_ref() {
-            guest.response_tx.send(msg).await?;
-        }
+        let host_future = self.host.response_tx.send(msg.clone());
+        let guest_future = self.guest.response_tx.send(msg);
+        try_join!(host_future,guest_future)?;
         Ok(())
     }
 }
@@ -66,11 +62,12 @@ struct Player {
 }
 
 async fn manage_sessions(mut rx: Receiver<IncomingMessage>) -> Result<()> {
+    //players that have created a room and are waiting for someone to join
+    let mut waiting_players: HashMap<JoinCode, Player> = HashMap::new();
     let mut sessions: HashMap<JoinCode, Session> = HashMap::new();
     let mut join_codes: HashMap<SocketAddr, JoinCode> = HashMap::new();
 
     while let Some(message) = rx.recv().await {
-        println!("received a message: {:?}", message);
         let IncomingMessage {
             content: message,
             sender: addr,
@@ -79,10 +76,18 @@ async fn manage_sessions(mut rx: Receiver<IncomingMessage>) -> Result<()> {
 
         match message {
             ClientMessage::CreateGame => {
-                create_session(&mut sessions, &mut join_codes, addr, response_tx).await?
+                register_game(&mut waiting_players, &mut join_codes, addr, response_tx).await?
             }
             ClientMessage::JoinGame { code } => {
-                join_session(&mut sessions, &mut join_codes, addr, response_tx, code).await?
+                join_session(
+                    &mut waiting_players,
+                    &mut sessions,
+                    &mut join_codes,
+                    addr,
+                    response_tx,
+                    code,
+                )
+                .await?
             }
             ClientMessage::PlayMove { column } => {
                 play_move(&mut sessions, &mut join_codes, addr, response_tx, column).await?
@@ -106,7 +111,7 @@ async fn play_move(
         response_tx.send(response).await?;
         return Ok(());
     };
-    let Some(player) = session.get_player(&addr) else {
+    let Some(player) = session.get_player(&addr) else { //todo I'd like for this check to not be necessary
         eprintln!(
             "this client played a move without joining the session. This shouldn't be possible."
         );
@@ -126,76 +131,87 @@ async fn play_move(
     };
     session.send_to_all(response).await?;
 
-
     //handle game over
-    if let Some(winner) = session.board.get_winner() {
-        let response = ServerMessage::GameOver {
+    let game_over_response = if let Some(winner) = session.board.get_winner() {
+        Some(ServerMessage::GameOver {
             winner: Some(winner),
-        };
-        session.send_to_all(response).await?;
+        })
     } else if session.board.is_full() {
-        let response = ServerMessage::GameOver { winner: None };
+        Some(ServerMessage::GameOver { winner: None })
+    } else {
+        None
+    };
+    if let Some(response) = game_over_response {
+        let join_code_1 = join_codes.remove(&session.host.addr).unwrap();
+        let join_code_2 = join_codes.remove(&session.guest.addr).unwrap();
+        assert_eq!(join_code_1, join_code_2); //todo
+        let mut session = sessions.remove(&join_code_1).unwrap();
         session.send_to_all(response).await?;
     }
     Ok(())
 }
 
 async fn join_session(
+    waiting_players: &mut HashMap<JoinCode, Player>,
     sessions: &mut HashMap<JoinCode, Session>,
     join_codes: &mut HashMap<SocketAddr, JoinCode>,
     addr: SocketAddr,
     response_tx: Sender<ServerMessage>,
     code: JoinCode,
 ) -> Result<()> {
-    let Some(session) = sessions.get_mut(&code) else {
-        let response = ServerMessage::GameNotFound;
-        response_tx.send(response).await?;
-        return Ok(());
-    };
-    if session.host.addr == addr {
-        let response = ServerMessage::CannotJoinOwnGame;
-        response_tx.send(response).await?;
-        return Ok(());
-    }
-    if session.guest.is_some() {
+    //check if the session already exists
+    if sessions.contains_key(&code) {
         let response = ServerMessage::GameFull;
         response_tx.send(response).await?;
         return Ok(());
     }
+
+    //check if the host is trying to join their own session
+    if waiting_players
+        .get(&code)
+        .is_some_and(|host| host.addr == addr)
+    {
+        let response = ServerMessage::CannotJoinOwnGame;
+        response_tx.send(response).await?;
+        return Ok(());
+    }
+
+    //check if a host is waiting
+    let Some(host) = waiting_players.remove(&code) else {
+        let response = ServerMessage::GameNotFound;
+        response_tx.send(response).await?;
+        return Ok(());
+    };
 
     let guest = Player {
         addr,
         response_tx,
         color: Color::Yellow, //the game guest will always be yellow
     };
-    session.add_guest(guest);
-    join_codes.insert(addr, code);
 
+    let session = Session::new(host, guest);
     let host_response = ServerMessage::GameStarted {
         your_color: session.host.color,
     };
     session.host.response_tx.send(host_response).await?;
 
     let guest_response = ServerMessage::GameStarted {
-        your_color: session.guest.as_ref().unwrap().color,
+        your_color: session.guest.color,
     };
-    session
-        .guest
-        .as_ref()
-        .unwrap()
-        .response_tx
-        .send(guest_response)
-        .await?;
+    session.guest.response_tx.send(guest_response).await?;
+
+    sessions.insert(code, session);
+    join_codes.insert(addr, code);
     Ok(())
 }
 
-async fn create_session(
-    sessions: &mut HashMap<JoinCode, Session>,
+async fn register_game(
+    waiting_players: &mut HashMap<JoinCode, Player>,
     join_codes: &mut HashMap<SocketAddr, JoinCode>,
     addr: SocketAddr,
     response_tx: Sender<ServerMessage>,
 ) -> Result<()> {
-    let join_code = unused_join_code(&sessions);
+    let join_code = unused_join_code(|k| waiting_players.contains_key(k));
     let response = ServerMessage::GameCreated { join_code };
     response_tx.send(response).await?;
     let host = Player {
@@ -205,16 +221,15 @@ async fn create_session(
         //todo maybe randomize this
         color: Color::Red,
     };
-    let session = Session::new(host);
-    sessions.insert(join_code, session);
+    waiting_players.insert(join_code, host);
     join_codes.insert(addr, join_code);
     Ok(())
 }
 
-fn unused_join_code(sessions: &HashMap<JoinCode, Session>) -> JoinCode {
+fn unused_join_code(contains_key: impl Fn(&JoinCode) -> bool) -> JoinCode {
     loop {
         let join_code = JoinCode::random();
-        if !sessions.contains_key(&join_code) {
+        if !contains_key(&join_code) {
             return join_code;
         }
     }
@@ -264,7 +279,6 @@ async fn read_stream(
     while let Some(frame) = reader.next().await {
         let frame = frame?;
         let message: ClientMessage = serde_json::from_slice(&frame)?;
-        println!("Server received: {:?}", message);
         let message = IncomingMessage {
             content: message,
             sender: addr,
