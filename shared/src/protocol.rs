@@ -15,7 +15,7 @@ pub enum MoveError {
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ClientMessage {
     CreateGame,
-    JoinGame { code: JoinCode },
+    JoinGame { join_code: JoinCode },
     PlayMove { column: ColumnIndex },
 }
 
