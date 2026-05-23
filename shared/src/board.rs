@@ -1,6 +1,9 @@
 use crate::column_index::ColumnIndex;
 use crate::protocol::MoveError;
 use itertools::Itertools;
+use rand::distr::Distribution;
+use rand::distr::StandardUniform;
+use rand::{Rng, RngExt};
 use serde::{Deserialize, Serialize};
 
 const COL_SIZE: usize = 6;
@@ -12,9 +15,24 @@ pub enum Color {
     Red,
 }
 
+impl Distribution<Color> for StandardUniform {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Color {
+        if rng.random() { Color::Red } else { Color::Yellow }
+    }
+}
+
+impl Color {
+    pub fn other(&self) -> Self {
+        match self {
+            Color::Yellow => Color::Red,
+            Color::Red => Color::Yellow,
+        }
+    }
+}
+
 type Slot = Option<Color>;
 
-#[derive(Clone, Serialize, Deserialize, Debug, Default)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Board {
     slots: Vec<Slot>,
 }
@@ -107,6 +125,12 @@ impl Board {
             let j = (ROW_SIZE + i).checked_sub(num + 1)?;
             self.get_slot(i, j)
         })
+    }
+}
+
+impl Default for Board {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
