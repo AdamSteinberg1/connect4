@@ -162,6 +162,7 @@ dependencies = [
  "anyhow",
  "bytes",
  "futures",
+ "rand 0.10.1",
  "serde_json",
  "shared",
  "tokio",
