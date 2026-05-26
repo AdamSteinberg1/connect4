@@ -1,4 +1,4 @@
-use crate::session::{Session};
+use crate::session::Session;
 use crate::{SessionInfo, SessionMessage};
 use shared::{Color, JoinCode, ServerMessage};
 use std::collections::HashMap;
@@ -76,7 +76,10 @@ impl Matchmaker {
                 outgoing_tx,
             } => {
                 //join existing session
-                let host = self.waiting_hosts.remove(&join_code).unwrap();
+                let Some(host) = self.waiting_hosts.remove(&join_code) else {
+                    outgoing_tx.send(ServerMessage::JoinFailed).await?;
+                    return Ok(());
+                };
                 let (red_tx, yellow_tx) = match host.color {
                     Color::Red => (host.outgoing_tx, outgoing_tx),
                     Color::Yellow => (outgoing_tx, host.outgoing_tx),

@@ -4,7 +4,7 @@ use anyhow::anyhow;
 use bytes::Bytes;
 use futures::StreamExt;
 use futures::sink::SinkExt;
-use shared::{ClientMessage, ServerMessage};
+use shared::{ClientMessage, MoveError, ServerMessage};
 use tokio::net::TcpStream;
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::sync::{mpsc, oneshot};
@@ -67,7 +67,9 @@ impl Connection {
                     join_code,
                 },
                 ClientMessage::PlayMove { .. } => {
-                    outgoing_tx.send(ServerMessage::GameNotFound).await?;
+                    outgoing_tx
+                        .send(ServerMessage::InvalidMove(MoveError::NotInGame))
+                        .await?;
                     continue;
                 }
             };
