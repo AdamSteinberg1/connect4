@@ -1,99 +1,109 @@
-use crate::session::Session;
-use crate::{SessionInfo, SessionMessage};
+use crate::session::SessionHandle;
 use shared::{Color, JoinCode, ServerMessage};
 use std::collections::HashMap;
+use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
 
-pub struct Matchmaker {
+struct Matchmaker {
     rx: mpsc::Receiver<MatchmakingMessage>,
     waiting_hosts: HashMap<JoinCode, WaitingHost>,
 }
 
-pub enum MatchmakingMessage {
-    JoinGame {
-        outgoing_tx: mpsc::Sender<ServerMessage>,
-        response_tx: oneshot::Sender<SessionInfo>,
-        join_code: JoinCode,
-    },
+enum MatchmakingMessage {
     CreateGame {
         outgoing_tx: mpsc::Sender<ServerMessage>,
-        response_tx: oneshot::Sender<SessionInfo>,
+        session_tx: oneshot::Sender<SessionHandle>,
+        color_tx: oneshot::Sender<Color>,
+    },
+    JoinGame {
+        outgoing_tx: mpsc::Sender<ServerMessage>,
+        response_tx: oneshot::Sender<Option<(SessionHandle, Color)>>,
+        join_code: JoinCode,
     },
 }
 
+// info for a game that has been created, but not yet started.
+// the host is waiting for an opponent to join
 struct WaitingHost {
-    session_tx: mpsc::Sender<SessionMessage>,
-    session_rx: mpsc::Receiver<SessionMessage>,
+    session_tx: oneshot::Sender<SessionHandle>,
     outgoing_tx: mpsc::Sender<ServerMessage>,
     color: Color,
 }
 
+#[derive(Debug, Error)]
+#[error("failed to join game")]
+struct JoinError;
+
 impl Matchmaker {
-    pub(crate) fn new(rx: mpsc::Receiver<MatchmakingMessage>) -> Self {
+    fn new(rx: mpsc::Receiver<MatchmakingMessage>) -> Self {
         Self {
             rx,
             waiting_hosts: Default::default(),
         }
     }
 
-    pub(crate) async fn run(mut self) -> anyhow::Result<()> {
+    //this has to consume self, because you can only run an actor once
+    async fn run(self) {
+        if let Err(e) = self.try_run().await {
+            eprintln!("matchmaker encountered an error: {:?}", e);
+        }
+    }
+
+    async fn try_run(mut self) -> anyhow::Result<()> {
         while let Some(message) = self.rx.recv().await {
             self.handle_message(message).await?;
         }
-
         Ok(())
     }
 
     async fn handle_message(&mut self, message: MatchmakingMessage) -> anyhow::Result<()> {
         match message {
             MatchmakingMessage::CreateGame {
-                response_tx,
                 outgoing_tx,
+                session_tx,
+                color_tx,
             } => {
                 let join_code = self.unused_join_code();
                 outgoing_tx
                     .send(ServerMessage::GameCreated { join_code })
                     .await?;
 
-                let (session_tx, session_rx) = mpsc::channel(32);
-                let color = rand::random();
-                let host = WaitingHost {
-                    session_tx: session_tx.clone(),
-                    outgoing_tx,
-                    color,
-                    session_rx,
-                };
-
-                self.waiting_hosts.insert(join_code, host);
-                let _ = response_tx.send(SessionInfo {
-                    session_tx,
-                    assigned_color: color,
-                });
+                let color: Color = rand::random();
+                let _ = color_tx.send(color);
+                self.waiting_hosts.insert(
+                    join_code,
+                    WaitingHost {
+                        session_tx,
+                        outgoing_tx,
+                        color,
+                    },
+                );
             }
             MatchmakingMessage::JoinGame {
                 join_code,
                 response_tx,
                 outgoing_tx,
             } => {
-                //join existing session
                 let Some(host) = self.waiting_hosts.remove(&join_code) else {
-                    outgoing_tx.send(ServerMessage::JoinFailed).await?;
+                    let _ = response_tx.send(None);
                     return Ok(());
                 };
+
                 let (red_tx, yellow_tx) = match host.color {
                     Color::Red => (host.outgoing_tx, outgoing_tx),
                     Color::Yellow => (outgoing_tx, host.outgoing_tx),
                 };
-                let session = Session::new(host.session_rx, red_tx, yellow_tx);
-                tokio::spawn(session.run());
-                let _ = response_tx.send(SessionInfo {
-                    session_tx: host.session_tx,
-                    assigned_color: host.color.other(),
-                });
+
+                let session = SessionHandle::new(red_tx, yellow_tx);
+
+                // Deliver the SessionHandle to the waiting host connection
+                let _ = host.session_tx.send(session.clone());
+                let _ = response_tx.send(Some((session, host.color.other())));
             }
         };
         Ok(())
     }
+
     fn unused_join_code(&self) -> JoinCode {
         loop {
             let code = JoinCode::random();
@@ -101,5 +111,58 @@ impl Matchmaker {
                 return code;
             }
         }
+    }
+}
+
+//the handle is what actually spawns the task and handles messaging
+#[derive(Clone)]
+pub struct MatchmakerHandle {
+    tx: mpsc::Sender<MatchmakingMessage>,
+}
+
+impl MatchmakerHandle {
+    pub fn new() -> Self {
+        let (tx, rx) = mpsc::channel(32);
+        let actor = Matchmaker::new(rx);
+        tokio::spawn(actor.run());
+
+        Self { tx }
+    }
+
+    // creates a new game that another player can join
+    // returns a receiver that will receive a session handle once an opponent has join
+    // and also color the host has been assigned
+    pub async fn create_game(
+        &self,
+        outgoing_tx: mpsc::Sender<ServerMessage>,
+    ) -> anyhow::Result<(oneshot::Receiver<SessionHandle>, Color)> {
+        let (session_tx, session_rx) = oneshot::channel();
+        let (color_tx, color_rx) = oneshot::channel();
+        self.tx
+            .send(MatchmakingMessage::CreateGame {
+                outgoing_tx,
+                session_tx,
+                color_tx,
+            })
+            .await?;
+        let color = color_rx.await?;
+        Ok((session_rx, color))
+    }
+
+    // joins a previously created game
+    pub async fn join_game(
+        &self,
+        join_code: JoinCode,
+        outgoing_tx: mpsc::Sender<ServerMessage>,
+    ) -> anyhow::Result<(SessionHandle, Color)> {
+        let (response_tx, response_rx) = oneshot::channel();
+        self.tx
+            .send(MatchmakingMessage::JoinGame {
+                response_tx,
+                outgoing_tx,
+                join_code,
+            })
+            .await?;
+        response_rx.await?.ok_or(JoinError.into())
     }
 }
