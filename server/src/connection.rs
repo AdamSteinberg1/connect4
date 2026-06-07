@@ -65,9 +65,13 @@ async fn request_session(
 
         match message {
             ClientMessage::CreateGame => {
-                let (mut session_rx, color) = matchmaker.create_game(outgoing_tx.clone()).await?;
-                let session = wait_for_session(&mut session_rx, reader, outgoing_tx).await?;
-                return Ok((session, color));
+                let (mut session_rx, color, join_code) =
+                    matchmaker.create_game(outgoing_tx.clone()).await?;
+                let session = wait_for_session(&mut session_rx, reader, outgoing_tx).await;
+                if session.is_err() {
+                    matchmaker.cancel_game(join_code).await?;
+                }
+                return Ok((session?, color));
             }
             ClientMessage::JoinGame { join_code } => {
                 return matchmaker.join_game(join_code, outgoing_tx.clone()).await;

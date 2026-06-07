@@ -9,12 +9,16 @@ struct Matchmaker {
 }
 
 enum MatchmakingMessage {
-    CreateGame {
+    Create {
         outgoing_tx: mpsc::Sender<ServerMessage>,
         session_tx: oneshot::Sender<SessionHandle>,
         color_tx: oneshot::Sender<Color>,
+        join_code_tx: oneshot::Sender<JoinCode>,
     },
-    JoinGame {
+    Cancel {
+        join_code: JoinCode,
+    },
+    Join {
         outgoing_tx: mpsc::Sender<ServerMessage>,
         response_tx: oneshot::Sender<Option<(SessionHandle, Color)>>,
         join_code: JoinCode,
@@ -53,10 +57,11 @@ impl Matchmaker {
 
     async fn handle_message(&mut self, message: MatchmakingMessage) -> anyhow::Result<()> {
         match message {
-            MatchmakingMessage::CreateGame {
+            MatchmakingMessage::Create {
                 outgoing_tx,
                 session_tx,
                 color_tx,
+                join_code_tx,
             } => {
                 let join_code = self.unused_join_code();
                 outgoing_tx
@@ -65,6 +70,7 @@ impl Matchmaker {
 
                 let color: Color = rand::random();
                 let _ = color_tx.send(color);
+                let _ = join_code_tx.send(join_code);
                 self.waiting_hosts.insert(
                     join_code,
                     WaitingHost {
@@ -74,7 +80,10 @@ impl Matchmaker {
                     },
                 );
             }
-            MatchmakingMessage::JoinGame {
+            MatchmakingMessage::Cancel { join_code } => {
+                self.waiting_hosts.remove(&join_code);
+            }
+            MatchmakingMessage::Join {
                 join_code,
                 response_tx,
                 outgoing_tx,
@@ -130,18 +139,29 @@ impl MatchmakerHandle {
     pub async fn create_game(
         &self,
         outgoing_tx: mpsc::Sender<ServerMessage>,
-    ) -> anyhow::Result<(oneshot::Receiver<SessionHandle>, Color)> {
+    ) -> anyhow::Result<(oneshot::Receiver<SessionHandle>, Color, JoinCode)> {
         let (session_tx, session_rx) = oneshot::channel();
         let (color_tx, color_rx) = oneshot::channel();
+        let (join_code_tx, join_code_rx) = oneshot::channel();
         self.tx
-            .send(MatchmakingMessage::CreateGame {
+            .send(MatchmakingMessage::Create {
                 outgoing_tx,
                 session_tx,
                 color_tx,
+                join_code_tx,
             })
             .await?;
         let color = color_rx.await?;
-        Ok((session_rx, color))
+        let join_code = join_code_rx.await?;
+        Ok((session_rx, color, join_code))
+    }
+
+    // cancels a previously created game that has not yet been joined,
+    pub async fn cancel_game(&self, join_code: JoinCode) -> anyhow::Result<()> {
+        Ok(self
+            .tx
+            .send(MatchmakingMessage::Cancel { join_code })
+            .await?)
     }
 
     // joins a previously created game
@@ -152,7 +172,7 @@ impl MatchmakerHandle {
     ) -> anyhow::Result<(SessionHandle, Color)> {
         let (response_tx, response_rx) = oneshot::channel();
         self.tx
-            .send(MatchmakingMessage::JoinGame {
+            .send(MatchmakingMessage::Join {
                 response_tx,
                 outgoing_tx,
                 join_code,
