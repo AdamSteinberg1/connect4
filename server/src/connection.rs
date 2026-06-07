@@ -16,7 +16,7 @@ type Writer = FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>;
 
 enum ShutdownReason {
     ClientDisconnected,
-    GameOver,
+    SessionClosed,
 }
 
 pub async fn handle_connection(
@@ -109,7 +109,7 @@ async fn relay_moves(
     loop {
         let frame = select! {
             frame = reader.next() => frame,
-            _ = session.closed() => return Ok(ShutdownReason::GameOver),
+            _ = session.closed() => return Ok(ShutdownReason::SessionClosed),
         };
 
         let Some(frame) = frame else {

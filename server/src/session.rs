@@ -1,6 +1,6 @@
-use futures::future::try_join;
 use shared::{Board, Color, ColumnIndex, ServerMessage};
 use tokio::sync::mpsc;
+use tokio::try_join;
 
 struct Session {
     rx: mpsc::Receiver<SessionMessage>,
@@ -66,7 +66,7 @@ impl Session {
     }
 
     async fn send_to_all(&mut self, msg: ServerMessage) -> anyhow::Result<()> {
-        try_join(self.red_tx.send(msg.clone()), self.yellow_tx.send(msg)).await?;
+        try_join!(self.red_tx.send(msg.clone()), self.yellow_tx.send(msg))?;
         Ok(())
     }
 
@@ -78,15 +78,14 @@ impl Session {
     }
 
     async fn try_run(mut self) -> anyhow::Result<()> {
-        try_join(
+        try_join!(
             self.red_tx.send(ServerMessage::GameStarted {
                 your_color: Color::Red,
             }),
             self.yellow_tx.send(ServerMessage::GameStarted {
                 your_color: Color::Yellow,
             }),
-        )
-        .await?;
+        )?;
 
         while let Some(message) = self.rx.recv().await {
             if let SessionOutcome::Ended = self.handle_message(message).await? {
@@ -113,11 +112,7 @@ impl Session {
                     color,
                     board: self.board.clone(),
                 };
-                let other_player_tx = match color {
-                    Color::Yellow => &self.red_tx,
-                    Color::Red => &self.yellow_tx,
-                };
-                other_player_tx.send(response).await?;
+                self.send_to_all(response).await?;
             }
             Err(e) => {
                 let response = ServerMessage::InvalidMove(e);

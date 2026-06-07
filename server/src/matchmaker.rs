@@ -1,7 +1,6 @@
 use crate::session::SessionHandle;
 use shared::{Color, JoinCode, ServerMessage};
 use std::collections::HashMap;
-use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
 
 struct Matchmaker {
@@ -29,10 +28,6 @@ struct WaitingHost {
     outgoing_tx: mpsc::Sender<ServerMessage>,
     color: Color,
 }
-
-#[derive(Debug, Error)]
-#[error("failed to join game")]
-struct JoinError;
 
 impl Matchmaker {
     fn new(rx: mpsc::Receiver<MatchmakingMessage>) -> Self {
@@ -96,7 +91,7 @@ impl Matchmaker {
 
                 let session = SessionHandle::new(red_tx, yellow_tx);
 
-                // Deliver the SessionHandle to the waiting host connection
+                // deliver the SessionHandle to the waiting host connection
                 let _ = host.session_tx.send(session.clone());
                 let _ = response_tx.send(Some((session, host.color.other())));
             }
@@ -163,6 +158,8 @@ impl MatchmakerHandle {
                 join_code,
             })
             .await?;
-        response_rx.await?.ok_or(JoinError.into())
+        response_rx
+            .await?
+            .ok_or(anyhow::anyhow!("failed to join game"))
     }
 }
