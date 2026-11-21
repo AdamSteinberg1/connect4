@@ -24,23 +24,27 @@ impl ColumnIndex {
         self.0
     }
 
-    pub fn increment(mut self) {
+    pub fn increment(self) -> Self {
         if self.0 < Self::MAX {
-            self.0 += 1;
+            Self(self.0 + 1)
+        } else {
+            Self::right_most()
         }
     }
 
-    pub fn decrement(mut self) {
+    pub fn decrement(self) -> Self {
         if self.0 > 0 {
-            self.0 -= 1;
+            Self(self.0 - 1)
+        } else {
+            Self::left_most()
         }
     }
 
     pub fn right_most() -> Self {
-        ColumnIndex(Self::MAX)
+        Self(Self::MAX)
     }
 
     pub fn left_most() -> Self {
-        ColumnIndex(0)
+        Self(0)
     }
 }

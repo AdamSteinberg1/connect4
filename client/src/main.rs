@@ -68,21 +68,19 @@ impl App {
     }
 
     fn increment_selection(&mut self) {
-        if let Some(col_idx) = self.board_widget.selected_column.as_mut() {
-            col_idx.increment();
-        } else {
-            //default to right-most column
-            self.board_widget.selected_column = Some(ColumnIndex::right_most());
-        }
+        let column = match self.board_widget.selected_column {
+            Some(col_idx) => col_idx.increment(),
+            None => ColumnIndex::right_most(),
+        };
+        self.board_widget.selected_column = Some(column);
     }
 
     fn decrement_selection(&mut self) {
-        if let Some(col_idx) = self.board_widget.selected_column.as_mut() {
-            col_idx.decrement()
-        } else {
-            //default to left-most column
-            self.board_widget.selected_column = Some(ColumnIndex::left_most())
-        }
+        let column = match self.board_widget.selected_column {
+            Some(col_idx) => col_idx.decrement(),
+            None => ColumnIndex::left_most(),
+        };
+        self.board_widget.selected_column = Some(column);
     }
 
     /// updates the application's state based on user input

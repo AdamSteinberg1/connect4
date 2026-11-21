@@ -165,20 +165,9 @@ dependencies = [
  "rand 0.10.1",
  "serde_json",
  "shared",
+ "thiserror 2.0.17",
  "tokio",
- "tokio-util",
-]
-
-[[package]]
-name = "connect4-test-client"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bytes",
- "futures",
- "serde_json",
- "shared",
- "tokio",
+ "tokio-stream",
  "tokio-util",
 ]
 
@@ -1577,6 +1566,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.111",
+]
+
+[[package]]
+name = "tokio-stream"
+version = "0.1.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a3d06f0b082ba57c26b79407372e57cf2a1e28124f78e9479fe80322cf53420b"
+dependencies = [
+ "futures-core",
+ "pin-project-lite",
+ "tokio",
 ]
 
 [[package]]
