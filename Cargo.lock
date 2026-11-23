@@ -149,10 +149,15 @@ name = "connect4-client"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bytes",
  "crossterm",
+ "futures",
  "itertools 0.14.0",
  "ratatui",
+ "serde_json",
  "shared",
+ "tokio",
+ "tokio-util",
 ]
 
 [[package]]
@@ -208,6 +213,7 @@ dependencies = [
  "crossterm_winapi",
  "derive_more",
  "document-features",
+ "futures-core",
  "mio",
  "parking_lot",
  "rustix",

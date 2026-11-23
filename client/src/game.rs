@@ -1,3 +1,4 @@
+use crate::selector::ColumnSelector;
 use shared::{Board, Color, ColumnIndex};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -19,7 +20,7 @@ pub enum Input {
 pub struct Game {
     board: Board,
     status: Status,
-    selected_column: Option<ColumnIndex>,
+    selector: ColumnSelector,
     last_move_invalid: bool,
 }
 
@@ -28,7 +29,7 @@ impl Game {
         Self {
             board: Board::new(),
             status: Status::InProgress { turn: Color::Red },
-            selected_column: None,
+            selector: ColumnSelector::default(),
             last_move_invalid: false,
         }
     }
@@ -42,7 +43,7 @@ impl Game {
     }
 
     pub fn selected_column(&self) -> Option<ColumnIndex> {
-        self.selected_column
+        self.selector.selected()
     }
 
     pub fn last_move_invalid(&self) -> bool {
@@ -51,33 +52,17 @@ impl Game {
 
     pub fn handle_input(&mut self, input: Input) {
         match (self.status, input) {
-            (Status::InProgress { .. }, Input::Left) => self.decrement_selection(),
-            (Status::InProgress { .. }, Input::Right) => self.increment_selection(),
-            (Status::InProgress { .. }, Input::SelectColumn(col)) => {
-                self.selected_column = Some(col);
-            }
+            (Status::InProgress { .. }, Input::Left) => self.selector.move_left(),
+            (Status::InProgress { .. }, Input::Right) => self.selector.move_right(),
+            (Status::InProgress { .. }, Input::SelectColumn(col)) => self.selector.select(col),
             (Status::InProgress { turn }, Input::Confirm) => {
-                if let Some(col) = self.selected_column {
+                if let Some(col) = self.selector.selected() {
                     self.take_turn(col, turn);
                 }
             }
             (Status::Won(_) | Status::Draw, Input::Confirm) => *self = Self::new(),
             _ => {}
         }
-    }
-
-    fn increment_selection(&mut self) {
-        self.selected_column = Some(match self.selected_column {
-            Some(col) => col.increment(),
-            None => ColumnIndex::right_most(),
-        });
-    }
-
-    fn decrement_selection(&mut self) {
-        self.selected_column = Some(match self.selected_column {
-            Some(col) => col.decrement(),
-            None => ColumnIndex::left_most(),
-        });
     }
 
     fn take_turn(&mut self, column: ColumnIndex, color: Color) {

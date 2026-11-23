@@ -11,14 +11,22 @@ use ratatui::{
     text::{Line, Span, Text},
     widgets::{Block, BorderType::QuadrantInside, Widget},
 };
-use shared::Color;
+use shared::{Board, Color, ColumnIndex};
 
-impl Widget for &Game {
+/// the board screen shared by local and online games
+pub struct GameScreen<'a> {
+    pub heading: Text<'static>,
+    pub board: &'a Board,
+    pub selected_column: Option<ColumnIndex>,
+    pub controls: Line<'static>,
+}
+
+impl Widget for GameScreen<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let block = Block::bordered()
             .border_type(QuadrantInside)
             .border_style(Style::new().blue())
-            .title_bottom(controls_line());
+            .title_bottom(self.controls);
 
         let inner_area = block.inner(area);
         block.render(area, buf);
@@ -44,26 +52,43 @@ impl Widget for &Game {
             .constraints([Constraint::Percentage(50), Constraint::Min(2)])
             .split(vertical_thirds[0]);
 
-        heading(self).render(heading_layout[1], buf);
+        self.heading.render(heading_layout[1], buf);
         BoardWidget {
-            board: self.board(),
-            selected_column: self.selected_column(),
+            board: self.board,
+            selected_column: self.selected_column,
         }
         .render(horizontal_thirds[1], buf);
     }
 }
 
-fn controls_line() -> Line<'static> {
-    Line::from(vec![
-        " Place ".into(),
-        "<Enter> ".blue().bold(),
-        "Move ".into(),
-        "<Left/Right> ".blue().bold(),
-        "Quit ".into(),
-        "<Q> ".blue().bold(),
-    ])
-    .centered()
-    .white()
+impl Widget for &Game {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        GameScreen {
+            heading: heading(self),
+            board: self.board(),
+            selected_column: self.selected_column(),
+            controls: controls_line(&[
+                ("Place", "<Enter>"),
+                ("Move", "<Left/Right>"),
+                ("Menu", "<Esc>"),
+                ("Quit", "<Q>"),
+            ]),
+        }
+        .render(area, buf);
+    }
+}
+
+/// builds the bottom border hint line from (action, key) pairs
+pub fn controls_line(controls: &[(&'static str, &'static str)]) -> Line<'static> {
+    let spans: Vec<Span<'static>> = std::iter::once(Span::raw(" "))
+        .chain(controls.iter().flat_map(|(action, key)| {
+            [
+                Span::raw(format!("{action} ")),
+                Span::styled(format!("{key} "), Style::new().blue().bold()),
+            ]
+        }))
+        .collect();
+    Line::from(spans).centered().white()
 }
 
 fn heading(game: &Game) -> Text<'static> {
@@ -87,7 +112,7 @@ fn color_name(color: Color) -> &'static str {
     }
 }
 
-fn colored(text: String, color: Color) -> Span<'static> {
+pub fn colored(text: String, color: Color) -> Span<'static> {
     match color {
         Color::Red => text.red(),
         Color::Yellow => text.yellow(),
