@@ -1,15 +1,11 @@
 # Connect 4
 
-A terminal-based Connect 4 game implementation in Rust using the Ratatui TUI framework.
-
-## Overview
-
-Connect 4 is a two-player connection game where players alternate dropping colored discs into a vertical grid. This implementation provides an interactive terminal user interface with full game logic.
+Have you ever wanted to play Connect $ from your terminal? Now you can!
 
 ## Features
 
-- Interactive terminal UI using [Ratatui](https://ratatui.rs/)
-- Color-coded players (Red and Yellow)
+- Interactive terminal UI built using [Ratatui](https://ratatui.rs/)
+- Local and Online Multiplayer
 - Keyboard controls
 
 ## Quick Start
@@ -28,27 +24,20 @@ cargo run -p connect4-client --release
 | `←` / `→` | Move selection left/right |
 | `Enter` | Place disc in selected column |
 | `Q` / `Esc` | Quit game |
-| `1-7` | Select column (quick select) |
+| `1-7` | Select column |
 
 ## Gameplay
 
-Players alternate turns between Red and Yellow. The two players are intended to pass the kayboard between each other. The first player to connect four discs horizontally, vertically, or diagonally wins. If the board fills without a winner, the game is a draw.
+Players alternate turns between Red and Yellow. For local multiplayer, the two players are intended to pass the keyboard between each other. The first player to connect four discs horizontally, vertically, or diagonally wins.
+
+## Online Multiplayer
+
+From the main menu, you have the choice to create or join an online game. If you create an online game, then you are the host and will be assigned a join code that you can share with your opponent. If you choose to join an online game, you will be prompted to enter the join code that the host shared with you.
 
 ## Project Structure
+The project is a Cargo workspace containing three crates. Two binary crates and one library crate.
+1. client - binary crate that each player runs on their machine.
+2. server - binary crate that runs on the server and all clients connect to.
+3 shared - library crate containing common data structures that both the client and server use.
 
-```
-connect4/
-├── src/
-│   ├── main.rs      # Main application logic and TUI rendering
-│   └── board.rs     # Game board state and win detection logic
-├── Cargo.toml       # Project manifest with dependencies
-├── Cargo.lock       # Dependency lock file
-└── .gitignore       # Git ignore rules
-```
 
-## Dependencies
-
-- **ratatui** - Terminal UI framework for rendering
-- **crossterm** - Cross-platform terminal manipulation and event handling
-- **anyhow** - Simplified error handling
-- **itertools** - Extended iterator functionality

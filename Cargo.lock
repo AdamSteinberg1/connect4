@@ -131,21 +131,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "compact_str"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3fdb1325a1cece981e8a296ab8f0f9b63ae357bd0784a9faaf548cc7b480707a"
-dependencies = [
- "castaway",
- "cfg-if",
- "itoa",
- "rustversion",
- "ryu",
- "static_assertions",
-]
-
-[[package]]
-name = "connect4-client"
+name = "client"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -161,19 +147,17 @@ dependencies = [
 ]
 
 [[package]]
-name = "connect4-server"
-version = "0.1.0"
+name = "compact_str"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3fdb1325a1cece981e8a296ab8f0f9b63ae357bd0784a9faaf548cc7b480707a"
 dependencies = [
- "anyhow",
- "bytes",
- "futures",
- "rand 0.10.1",
- "serde_json",
- "shared",
- "thiserror 2.0.17",
- "tokio",
- "tokio-stream",
- "tokio-util",
+ "castaway",
+ "cfg-if",
+ "itoa",
+ "rustversion",
+ "ryu",
+ "static_assertions",
 ]
 
 [[package]]
@@ -1286,6 +1270,22 @@ dependencies = [
  "serde",
  "serde_core",
  "zmij",
+]
+
+[[package]]
+name = "server"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "futures",
+ "rand 0.10.1",
+ "serde_json",
+ "shared",
+ "thiserror 2.0.17",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
 ]
 
 [[package]]
